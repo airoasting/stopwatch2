@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스탑워치</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --surface: #ffffff;
+    --text: #1c1b19;
+    --muted: #8a8780;
+    --line: #e6e3dd;
+    --start: #1f8a4c;
+    --stop: #c8412f;
+    --neutral: #e9e6e0;
+    --best: #1f8a4c;
+    --worst: #c8412f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413;
+      --surface: #1e1d1b;
+      --text: #f1efea;
+      --muted: #8f8c85;
+      --line: #2e2c29;
+      --start: #34b36a;
+      --stop: #e2604d;
+      --neutral: #2e2c29;
+      --best: #4cc77f;
+      --worst: #ef7765;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 16px;
+  }
+  .app { width: 100%; max-width: 440px; }
+  .display {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-weight: 200;
+    font-size: clamp(56px, 18vw, 88px);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    margin: 24px 0 8px;
+  }
+  .display .ms { color: var(--muted); }
+  .sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    min-height: 20px;
+    margin-bottom: 36px;
+  }
+  .controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  button {
+    flex: 1;
+    height: 64px;
+    border: 0;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .08s ease, opacity .15s ease, background .15s ease;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .4; cursor: default; transform: none; }
+  #secondary { background: var(--neutral); color: var(--text); }
+  #primary { background: var(--start); color: #fff; }
+  #primary.running { background: var(--stop); }
+  .laps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+  }
+  .laps li {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 4px;
+    border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
+    font-size: 16px;
+  }
+  .laps li .total { color: var(--muted); font-size: 13px; margin-left: 10px; }
+  .laps li.best { color: var(--best); }
+  .laps li.worst { color: var(--worst); }
+  .hint {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 28px;
+  }
+  kbd {
+    font-family: inherit;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+    background: var(--surface);
+  }
+</style>
+</head>
+<body>
+  <main class="app">
+    <div class="display" id="display">00:00<span class="ms">.00</span></div>
+    <div class="sub" id="sub"></div>
+
+    <div class="controls">
+      <button id="secondary" disabled>랩</button>
+      <button id="primary">시작</button>
+    </div>
+
+    <ol class="laps" id="laps"></ol>
+
+    <p class="hint"><kbd>Space</kbd> 시작/정지 · <kbd>L</kbd> 랩 · <kbd>R</kbd> 초기화</p>
+  </main>
+
+<script>
+  const display = document.getElementById('display');
+  const sub = document.getElementById('sub');
+  const primary = document.getElementById('primary');
+  const secondary = document.getElementById('secondary');
+  const lapList = document.getElementById('laps');
+
+  let running = false;
+  let startAt = 0;      // performance.now() 기준 시작 시각
+  let elapsed = 0;      // 정지 시점까지 누적된 시간(ms)
+  let laps = [];        // 각 랩의 누적 시각(ms)
+  let raf = null;
+
+  const now = () => elapsed + (running ? performance.now() - startAt : 0);
+
+  function format(ms) {
+    const cs = Math.floor(ms / 10) % 100;
+    const s = Math.floor(ms / 1000) % 60;
+    const m = Math.floor(ms / 60000) % 60;
+    const h = Math.floor(ms / 3600000);
+    const pad = n => String(n).padStart(2, '0');
+    const main = (h > 0 ? h + ':' + pad(m) : pad(m)) + ':' + pad(s);
+    return { main, cs: '.' + pad(cs), text: main + '.' + pad(cs) };
+  }
+
+  function render() {
+    const t = now();
+    const f = format(t);
+    display.innerHTML = f.main + '<span class="ms">' + f.cs + '</span>';
+    if (laps.length) {
+      const last = laps[laps.length - 1];
+      sub.textContent = '현재 랩 ' + format(t - last).text;
+    } else {
+      sub.textContent = '';
+    }
+  }
+
+  function tick() {
+    render();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function renderLaps() {
+    const splits = laps.map((t, i) => t - (i ? laps[i - 1] : 0));
+    let best = -1, worst = -1;
+    if (splits.length >= 2) {
+      best = splits.indexOf(Math.min(...splits));
+      worst = splits.indexOf(Math.max(...splits));
+    }
+    lapList.innerHTML = '';
+    for (let i = splits.length - 1; i >= 0; i--) {
+      const li = document.createElement('li');
+      if (i === best) li.className = 'best';
+      if (i === worst) li.className = 'worst';
+      li.innerHTML =
+        '<span>랩 ' + (i + 1) + '</span>' +
+        '<span>' + format(splits[i]).text +
+        '<span class="total">' + format(laps[i]).text + '</span></span>';
+      lapList.appendChild(li);
+    }
+  }
+
+  function updateButtons() {
+    primary.textContent = running ? '정지' : (elapsed > 0 ? '계속' : '시작');
+    primary.classList.toggle('running', running);
+    secondary.textContent = running || elapsed === 0 ? '랩' : '초기화';
+    secondary.disabled = !running && elapsed === 0;
+  }
+
+  function toggle() {
+    if (running) {
+      elapsed = now();
+      running = false;
+      cancelAnimationFrame(raf);
+      render();
+    } else {
+      startAt = performance.now();
+      running = true;
+      tick();
+    }
+    updateButtons();
+  }
+
+  function lap() {
+    if (!running) return;
+    laps.push(now());
+    renderLaps();
+  }
+
+  function reset() {
+    if (running) return;
+    elapsed = 0;
+    laps = [];
+    renderLaps();
+    render();
+    updateButtons();
+  }
+
+  primary.addEventListener('click', toggle);
+  secondary.addEventListener('click', () => running ? lap() : reset());
+
+  document.addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    else if (e.code === 'KeyL') lap();
+    else if (e.code === 'KeyR') reset();
+  });
+
+  render();
+  updateButtons();
+</script>
+</body>
+</html>
